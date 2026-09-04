@@ -1,6 +1,6 @@
 //! Reads, and the version they were taken at.
 
-use crate::error::{errno, Fence, Rejected};
+use crate::error::{Fence, Rejected, errno};
 use crate::{Bulk, Replicated, Version};
 use librados::{ObjectStat, ReadOp};
 use std::collections::BTreeMap;
@@ -25,13 +25,13 @@ impl Replicated {
     /// [`Fenced`](Rejected::Fenced). Replay reads the whole object at the version its head
     /// read saw.
     ///
-    /// `prefix` and `start_after` reach the OSD as C strings (`librados_c.cc:4411-4412`), so
-    /// neither can hold an interior NUL byte.
+    /// `prefix` and `start_after` reach the OSD as NUL-terminated byte strings
+    /// (`librados_c.cc:4411-4412`), so neither can hold a NUL byte.
     pub fn omap_page(
         &self,
         oid: &str,
-        prefix: &str,
-        start_after: &str,
+        prefix: &[u8],
+        start_after: &[u8],
         limit: u32,
         at: Option<Version>,
     ) -> Result<Page, Rejected> {

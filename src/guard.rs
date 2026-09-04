@@ -1,9 +1,9 @@
 //! Stacking the guards of a [`Write`](crate::Write) onto a write op, and reading back which
 //! one rejected it.
 
-use crate::error::{errno, Fence, Rejected};
 use crate::Version;
-use librados::{CmpHandle, WriteError, WriteOp, CMPXATTR_OP_EQ};
+use crate::error::{Fence, Rejected, errno};
+use librados::{CMPXATTR_OP_EQ, CmpHandle, WriteError, WriteOp};
 
 /// A comparison placed ahead of the mutations in the same operation. Every guard has to hold
 /// or no mutation is applied.
@@ -44,6 +44,9 @@ pub(crate) fn push<'a>(op: &mut WriteOp, guards: &[Guard<'a>]) -> Result<Guards<
     for guard in guards {
         match guard {
             Guard::Version(version) => {
+                if seen.version.is_some() {
+                    return Err(Rejected::Rados(errno::EINVAL));
+                }
                 op.assert_version(version.0);
                 seen.version = Some(*version);
             }
@@ -95,5 +98,20 @@ impl Guards<'_> {
             }),
             (None, None) => Rejected::Rados(errno::ECANCELED),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_multiple_version_guards() {
+        let mut op = WriteOp::new();
+        let guards = [Guard::Version(Version(1)), Guard::Version(Version(2))];
+        assert!(matches!(
+            push(&mut op, &guards),
+            Err(Rejected::Rados(errno::EINVAL))
+        ));
     }
 }

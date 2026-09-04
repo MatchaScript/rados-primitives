@@ -1,6 +1,6 @@
 //! Writer election.
 
-use crate::error::{errno, Rejected};
+use crate::error::{Rejected, errno};
 use crate::{Guard, Mutation, Replicated, Write};
 use librados::RadosError;
 use std::time::Duration;
@@ -48,11 +48,9 @@ impl Replicated {
         match self.lock_exclusive(e.oid, e.name, cookie, "", ttl) {
             Ok(true) => {}
             Ok(false) => return Ok(None),
-            // Already held under this cookie (`-EEXIST`): extend it and go on. A renew that
-            // finds nothing leaves no locker entry, which step 2 reads as a lost lease.
-            Err(Rejected::Exists) => {
-                self.renew(e.oid, e.name, cookie, "", ttl)?;
-            }
+            // `take_epoch` renews after reading the locker so that the cookie and client are
+            // checked together before any fencing side effect.
+            Err(Rejected::Exists) => {}
             Err(err) => return Err(err),
         }
         let acquired = self.take_epoch(e, cookie, ttl);
@@ -81,6 +79,10 @@ impl Replicated {
             // The lease expired between taking it and reading it back.
             return Ok(None);
         };
+        if !self.renew(e.oid, e.name, cookie, "", ttl)? {
+            // Another client may have acquired the expired lease under the same cookie.
+            return Ok(None);
+        }
 
         let (mut state, _) = self.omap_get(e.oid, &[e.epoch_key, e.holder_key])?;
         let raw_epoch = state.remove(e.epoch_key).unwrap_or_default();
@@ -89,6 +91,12 @@ impl Replicated {
 
         if !holder.is_empty() && holder != own_addr.as_bytes() {
             self.fence(&holder, ttl)?;
+        }
+
+        // Fencing can outlast the lease. This narrows the window in which a lost lease still
+        // advances the epoch; the `OmapEq` guard below is what makes that harmless.
+        if !self.renew(e.oid, e.name, cookie, "", ttl)? {
+            return Ok(None);
         }
 
         // The guard is the raw value that was read, so a missing epoch key guards on `b""`:

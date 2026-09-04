@@ -5,9 +5,10 @@ edition = "2024"
 authors = ["matcha"]
 description = "Guarded single-object operations, leases, watch and writer election on RADOS."
 license = "Apache-2.0"
+publish = false
 
 [dependencies]
-librados = { git = "https://github.com/MatchaScript/librados-rs.git", branch = "main" }
+librados = { git = "https://github.com/MatchaScript/librados-rs.git", rev = "d061d08" }
 thiserror = "1.0"
 
 [dev-dependencies]

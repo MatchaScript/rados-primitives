@@ -2,8 +2,8 @@
 //! They need the micro cluster `hack/run-ceph.sh` starts: `cargo test -- --include-ignored`.
 
 use rados_primitives::{
-    epoch_bytes, Bulk, Election, Fence, Guard, Mutation, Rados, Rejected, Replicated, Version,
-    Write,
+    Bulk, Election, Fence, Guard, Mutation, Rados, Rejected, Replicated, Version, Write,
+    epoch_bytes,
 };
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -61,7 +61,7 @@ fn value(r: &Replicated, oid: &str, key: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn keys(r: &Replicated, oid: &str) -> Vec<Vec<u8>> {
-    r.omap_page(oid, "", "", 100, None)
+    r.omap_page(oid, b"", b"", 100, None)
         .expect("omap_page")
         .entries
         .into_iter()
@@ -172,6 +172,18 @@ fn fenced_names_the_failing_guard() {
             assert_eq!(value(r, oid, b"rev").as_deref(), Some(&b"7"[..]), "{name}");
         }
 
+        let err = r
+            .write(
+                oid,
+                Write {
+                    guards: vec![Guard::Version(version), Guard::Version(stale)],
+                    mutations: vec![Mutation::OmapSet(&[(b"rev", b"99")])],
+                },
+            )
+            .expect_err("two version guards");
+        assert!(matches!(err, Rejected::Rados(EINVAL)), "{err}");
+        assert_eq!(value(r, oid, b"rev").as_deref(), Some(&b"7"[..]));
+
         // -ENOENT is a fence only when the write asked for the object to exist.
         let err = r
             .write(
@@ -223,7 +235,7 @@ fn omap_page_pins_the_version() {
             &[(b"log/1", b"a"), (b"log/2", b"b"), (b"other", b"c")],
         );
 
-        let page = r.omap_page(oid, "log/", "", 10, None).expect("page");
+        let page = r.omap_page(oid, b"log/", b"", 10, None).expect("page");
         assert!(!page.more);
         assert_eq!(
             page.entries,
@@ -235,28 +247,32 @@ fn omap_page_pins_the_version() {
 
         // `more` is set by whichever cap the answer hits first, `limit` included
         // (`PrimaryLogPG.cc:7983-7985`), so a small limit pages a three-key object.
-        let first = r.omap_page(oid, "log/", "", 1, None).expect("first of two");
+        let first = r
+            .omap_page(oid, b"log/", b"", 1, None)
+            .expect("first of two");
         assert!(first.more);
         assert_eq!(first.entries, vec![(b"log/1".to_vec(), b"a".to_vec())]);
         let rest = r
-            .omap_page(oid, "log/", "log/1", 1, None)
+            .omap_page(oid, b"log/", b"log/1", 1, None)
             .expect("rest after log/1");
         assert!(!rest.more);
         assert_eq!(rest.entries, vec![(b"log/2".to_vec(), b"b".to_vec())]);
 
         let at = page.version;
-        let pinned = r.omap_page(oid, "log/", "", 10, Some(at)).expect("pinned");
+        let pinned = r
+            .omap_page(oid, b"log/", b"", 10, Some(at))
+            .expect("pinned");
         assert_eq!(pinned.entries, page.entries);
         assert_eq!(pinned.version, at);
 
         let after = r
-            .omap_page(oid, "log/", "log/1", 10, Some(at))
+            .omap_page(oid, b"log/", b"log/1", 10, Some(at))
             .expect("pinned page after log/1");
         assert_eq!(after.entries, vec![(b"log/2".to_vec(), b"b".to_vec())]);
 
         set(r, oid, &[(b"log/3", b"d")]);
         let err = r
-            .omap_page(oid, "log/", "", 10, Some(at))
+            .omap_page(oid, b"log/", b"", 10, Some(at))
             .expect_err("the object moved past the pin");
         assert!(
             matches!(err, Rejected::Fenced(Fence::Version { expected }) if expected == at),
@@ -295,16 +311,18 @@ fn write_once_keeps_the_first_content() {
 #[test]
 #[ignore]
 fn leases_expire_and_renew() {
-    with_pool(|_, _, r| {
+    with_pool(|_, pool, r| {
         let (oid, lease) = ("leased", "writer");
         let long = Duration::from_secs(30);
 
-        assert!(r
-            .lock_exclusive(oid, lease, "a", "holder A", long)
-            .expect("acquire"));
-        assert!(!r
-            .lock_exclusive(oid, lease, "b", "", long)
-            .expect("another cookie contends"));
+        assert!(
+            r.lock_exclusive(oid, lease, "a", "holder A", long)
+                .expect("acquire")
+        );
+        assert!(
+            !r.lock_exclusive(oid, lease, "b", "", long)
+                .expect("another cookie contends")
+        );
         assert!(
             matches!(
                 r.lock_exclusive(oid, lease, "a", "", long)
@@ -320,28 +338,49 @@ fn leases_expire_and_renew() {
         assert!(lockers[0].client.starts_with("client."), "{:?}", lockers[0]);
         assert!(is_entity_addr(&lockers[0].addr), "{}", lockers[0].addr);
 
-        assert!(!r
-            .renew(oid, "no such lease", "a", "", long)
-            .expect("renewing an unheld lease"));
+        assert!(
+            !r.renew(oid, "no such lease", "a", "", long)
+                .expect("renewing an unheld lease")
+        );
         // MUST_RENEW re-inserts the locker with `now + ttl` (`cls_lock.cc:195, 224-225`), so
         // renewing down to one second is what expires this lease.
-        assert!(r
-            .renew(oid, lease, "a", "", Duration::from_secs(1))
-            .expect("renew"));
+        assert!(
+            r.renew(oid, lease, "a", "", Duration::from_secs(1))
+                .expect("renew")
+        );
         std::thread::sleep(Duration::from_secs(2));
-        assert!(r
-            .lock_exclusive(oid, lease, "b", "", long)
-            .expect("acquire after the lease expired"));
+        assert!(
+            r.lock_exclusive(oid, lease, "b", "", long)
+                .expect("acquire after the lease expired")
+        );
 
         let client = r.lockers(oid, lease).expect("lockers")[0].client.clone();
         r.break_lock(oid, lease, &client, "b").expect("break_lock");
         assert!(r.lockers(oid, lease).expect("lockers").is_empty());
 
-        assert!(r
-            .lock_exclusive(oid, lease, "c", "", long)
-            .expect("re-acquire"));
+        assert!(
+            r.lock_exclusive(oid, lease, "c", "", long)
+                .expect("re-acquire")
+        );
         r.unlock(oid, lease, "c").expect("unlock");
         assert!(r.lockers(oid, lease).expect("lockers").is_empty());
+
+        assert!(
+            r.lock_exclusive(oid, lease, "shared", "", Duration::from_secs(1))
+                .expect("acquire shared cookie")
+        );
+        std::thread::sleep(Duration::from_secs(2));
+        let other_rados = connect();
+        let other = Replicated::open(&other_rados, pool).expect("second client");
+        assert!(
+            other
+                .lock_exclusive(oid, lease, "shared", "", long)
+                .expect("re-acquire shared cookie")
+        );
+        assert!(
+            !r.renew(oid, lease, "shared", "", long)
+                .expect("old client cannot renew new client's cookie")
+        );
     });
 }
 

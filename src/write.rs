@@ -11,6 +11,8 @@ pub enum Mutation<'a> {
     CreateExclusive,
     WriteFull(&'a [u8]),
     Append(&'a [u8]),
+    /// Keys are non-empty and hold no NUL byte, so every stored key can be used as an
+    /// [`omap_page`](Replicated::omap_page) cursor. Values are arbitrary bytes.
     OmapSet(&'a [(&'a [u8], &'a [u8])]),
     OmapRemove(&'a [&'a [u8]]),
     /// Removes the keys in `[begin, end)`.
@@ -50,13 +52,22 @@ fn push(op: &mut WriteOp, mutation: &Mutation<'_>) -> Result<(), Rejected> {
         Mutation::CreateExclusive => op.create(true),
         Mutation::WriteFull(data) => op.write_full(data),
         Mutation::Append(data) => op.append(data),
-        Mutation::OmapSet(entries) => op.omap_set(entries),
+        Mutation::OmapSet(entries) => {
+            if entries.iter().any(|(key, _)| !is_pageable_key(key)) {
+                return Err(Rejected::Rados(crate::error::errno::EINVAL));
+            }
+            op.omap_set(entries);
+        }
         Mutation::OmapRemove(keys) => op.omap_rm_keys(keys),
         Mutation::OmapRemoveRange { begin, end } => op.omap_rm_range(begin, end),
         Mutation::SetXattr(name, value) => op.setxattr(name, value)?,
         Mutation::Remove => op.remove(),
     }
     Ok(())
+}
+
+fn is_pageable_key(key: &[u8]) -> bool {
+    !key.is_empty() && !key.contains(&0)
 }
 
 impl Bulk {
@@ -82,5 +93,18 @@ impl Bulk {
 
     pub fn remove(&self, oid: &str) -> Result<(), Rejected> {
         Ok(self.io.remove(oid)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pageable_key;
+
+    #[test]
+    fn omap_keys_must_be_pageable() {
+        assert!(is_pageable_key(b"log/1"));
+        assert!(!is_pageable_key(b""));
+        assert!(!is_pageable_key(b"a\0b"));
+        assert!(is_pageable_key(&[0xff]));
     }
 }

@@ -1,7 +1,7 @@
 //! Watch and notify, passed through to librados.
 
-use crate::error::Rejected;
 use crate::Replicated;
+use crate::error::Rejected;
 use librados::{Notification, Watch};
 use std::time::Duration;
 
@@ -14,20 +14,16 @@ impl Replicated {
     /// `on_error` receives `-ENOTCONN` when the watch is lost; re-registering is up to the caller
     /// since this crate does not retry.
     ///
-    /// The [`Watch`] holds a clone of this handle's ioctx, and unregistering ends with
-    /// `set_sync_op_version` on it (`IoCtxImpl.cc:1785-1804`), which is the slot
-    /// `omap_page` and `omap_get` read their [`Version`](crate::Version) from. `Watch` is
-    /// `Send`, so drop it on the thread that owns this `Replicated`: a drop racing a read on
-    /// that thread hands the read the unwatch's version. This is why `Replicated` is not `Sync`:
-    /// two threads sharing one handle would race on the internal version slot, which the marker
-    /// cannot state for a handle it does not own.
+    /// The [`Watch`] owns a separate ioctx, so unregistering it cannot replace the
+    /// `last_version` used by reads on this handle.
     pub fn watch(
         &self,
         oid: &str,
         on_notify: Box<dyn FnMut(Notification) -> Vec<u8> + Send>,
         on_error: Box<dyn FnMut(i32) + Send>,
     ) -> Result<Watch, Rejected> {
-        Ok(self.io.watch(oid, on_notify, on_error)?)
+        let io = self.rados.create_ioctx(self.io.pool_name())?;
+        Ok(io.watch(oid, on_notify, on_error)?)
     }
 
     /// Notifies every watcher of `oid` and returns once they have all acked or `timeout` has

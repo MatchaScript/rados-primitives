@@ -3,9 +3,9 @@
 //! A lease decides who should be the writer. It does not fence a write on its own: `cls_lock`
 //! expires on the OSD's wall clock, and fencing requires a write guard such as an epoch comparison.
 
-use crate::error::{errno, Rejected};
 use crate::Replicated;
-use librados::{Locker, RadosError, LOCK_FLAG_MUST_RENEW};
+use crate::error::{Rejected, errno};
+use librados::{LOCK_FLAG_MUST_RENEW, Locker, RadosError};
 use std::time::Duration;
 
 impl Replicated {

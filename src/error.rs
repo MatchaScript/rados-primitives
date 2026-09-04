@@ -72,7 +72,7 @@ impl From<RadosError> for Rejected {
             RadosError::Rados(errno) => Rejected::Rados(errno),
             // A NUL byte in an oid, an xattr name or an omap bound: librados passes those as C
             // strings, so the op is rejected before it is sent.
-            RadosError::Nul(_) => Rejected::Rados(errno::EINVAL),
+            RadosError::Nul(_) | RadosError::InvalidHandle => Rejected::Rados(errno::EINVAL),
         }
     }
 }

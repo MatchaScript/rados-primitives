@@ -1,6 +1,6 @@
 //! Reads, and the version they were taken at.
 
-use crate::error::{errno, Fence, Rejected};
+use crate::error::{Fence, Rejected, errno};
 use crate::{Bulk, Replicated, Version};
 use librados::{ObjectStat, ReadOp};
 use std::collections::BTreeMap;

@@ -19,7 +19,7 @@ mod read;
 mod watch;
 mod write;
 
-pub use election::{epoch_bytes, Election};
+pub use election::{Election, epoch_bytes};
 pub use error::{Fence, Rejected};
 pub use guard::Guard;
 pub use read::Page;

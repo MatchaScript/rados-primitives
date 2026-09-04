@@ -1,6 +1,6 @@
 //! Writer election.
 
-use crate::error::{errno, Rejected};
+use crate::error::{Rejected, errno};
 use crate::{Guard, Mutation, Replicated, Write};
 use librados::RadosError;
 use std::time::Duration;
@@ -48,11 +48,9 @@ impl Replicated {
         match self.lock_exclusive(e.oid, e.name, cookie, "", ttl) {
             Ok(true) => {}
             Ok(false) => return Ok(None),
-            // Already held under this cookie (`-EEXIST`): extend it and go on. A renew that
-            // finds nothing leaves no locker entry, which step 2 reads as a lost lease.
-            Err(Rejected::Exists) => {
-                self.renew(e.oid, e.name, cookie, "", ttl)?;
-            }
+            // `take_epoch` renews after reading the locker so that the cookie and client are
+            // checked together before any fencing side effect.
+            Err(Rejected::Exists) => {}
             Err(err) => return Err(err),
         }
         let acquired = self.take_epoch(e, cookie, ttl);
@@ -81,6 +79,10 @@ impl Replicated {
             // The lease expired between taking it and reading it back.
             return Ok(None);
         };
+        if !self.renew(e.oid, e.name, cookie, "", ttl)? {
+            // Another client may have acquired the expired lease under the same cookie.
+            return Ok(None);
+        }
 
         let (mut state, _) = self.omap_get(e.oid, &[e.epoch_key, e.holder_key])?;
         let raw_epoch = state.remove(e.epoch_key).unwrap_or_default();
@@ -91,11 +93,17 @@ impl Replicated {
             self.fence(&holder, ttl)?;
         }
 
+        // Fencing can outlast the lease. Do not advance the epoch after losing it.
+        if !self.renew(e.oid, e.name, cookie, "", ttl)? {
+            return Ok(None);
+        }
+
         // The guard is the raw value that was read, so a missing epoch key guards on `b""`:
         // `omap_cmp` compares a missing key as empty (`PrimaryLogPG.cc:8088-8090`). Step 1
         // created the object with the `cls_lock` xattr, so the `-ENOENT` `omap_cmp` returns
         // on a missing object (`PrimaryLogPG.cc:8047-8050`) cannot arrive here.
-        let next = epoch_bytes(epoch + 1);
+        let next_epoch = increment_epoch(epoch)?;
+        let next = epoch_bytes(next_epoch);
         self.write(
             e.oid,
             Write {
@@ -106,7 +114,7 @@ impl Replicated {
                 ])],
             },
         )?;
-        Ok(Some(epoch + 1))
+        Ok(Some(next_epoch))
     }
 
     /// Blocklists the previous holder for `ttl` and waits until this client has the OSDMap
@@ -133,4 +141,23 @@ fn decode_epoch(raw: &[u8]) -> Result<u64, Rejected> {
     }
     let bytes: [u8; 8] = raw.try_into().map_err(|_| Rejected::Rados(errno::EINVAL))?;
     Ok(u64::from_be_bytes(bytes))
+}
+
+fn increment_epoch(epoch: u64) -> Result<u64, Rejected> {
+    epoch
+        .checked_add(1)
+        .ok_or(Rejected::Rados(errno::EOVERFLOW))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_does_not_wrap() {
+        assert!(matches!(
+            increment_epoch(u64::MAX),
+            Err(Rejected::Rados(errno::EOVERFLOW))
+        ));
+    }
 }

@@ -11,8 +11,8 @@ pub enum Mutation<'a> {
     CreateExclusive,
     WriteFull(&'a [u8]),
     Append(&'a [u8]),
-    /// Sets entries whose keys are non-empty UTF-8 without NUL bytes, so every stored key can
-    /// be used as an [`omap_page`](Replicated::omap_page) cursor. Values remain arbitrary bytes.
+    /// Keys are non-empty and hold no NUL byte, so every stored key can be used as an
+    /// [`omap_page`](Replicated::omap_page) cursor. Values are arbitrary bytes.
     OmapSet(&'a [(&'a [u8], &'a [u8])]),
     OmapRemove(&'a [&'a [u8]]),
     /// Removes the keys in `[begin, end)`.
@@ -67,7 +67,7 @@ fn push(op: &mut WriteOp, mutation: &Mutation<'_>) -> Result<(), Rejected> {
 }
 
 fn is_pageable_key(key: &[u8]) -> bool {
-    !key.is_empty() && !key.contains(&0) && std::str::from_utf8(key).is_ok()
+    !key.is_empty() && !key.contains(&0)
 }
 
 impl Bulk {
@@ -105,6 +105,6 @@ mod tests {
         assert!(is_pageable_key(b"log/1"));
         assert!(!is_pageable_key(b""));
         assert!(!is_pageable_key(b"a\0b"));
-        assert!(!is_pageable_key(&[0xff]));
+        assert!(is_pageable_key(&[0xff]));
     }
 }

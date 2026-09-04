@@ -8,7 +8,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-librados = { git = "https://github.com/MatchaScript/librados-rs.git", rev = "6c4a99612bf3c456b38440a5be667311a1ff4595" }
+librados = { git = "https://github.com/MatchaScript/librados-rs.git", rev = "1b3a4143cd5498df8b50b51dfeb91a4ba4eb4077" }
 thiserror = "1.0"
 
 [dev-dependencies]

@@ -61,7 +61,7 @@ fn value(r: &Replicated, oid: &str, key: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn keys(r: &Replicated, oid: &str) -> Vec<Vec<u8>> {
-    r.omap_page(oid, "", "", 100, None)
+    r.omap_page(oid, b"", b"", 100, None)
         .expect("omap_page")
         .entries
         .into_iter()
@@ -235,7 +235,7 @@ fn omap_page_pins_the_version() {
             &[(b"log/1", b"a"), (b"log/2", b"b"), (b"other", b"c")],
         );
 
-        let page = r.omap_page(oid, "log/", "", 10, None).expect("page");
+        let page = r.omap_page(oid, b"log/", b"", 10, None).expect("page");
         assert!(!page.more);
         assert_eq!(
             page.entries,
@@ -247,28 +247,32 @@ fn omap_page_pins_the_version() {
 
         // `more` is set by whichever cap the answer hits first, `limit` included
         // (`PrimaryLogPG.cc:7983-7985`), so a small limit pages a three-key object.
-        let first = r.omap_page(oid, "log/", "", 1, None).expect("first of two");
+        let first = r
+            .omap_page(oid, b"log/", b"", 1, None)
+            .expect("first of two");
         assert!(first.more);
         assert_eq!(first.entries, vec![(b"log/1".to_vec(), b"a".to_vec())]);
         let rest = r
-            .omap_page(oid, "log/", "log/1", 1, None)
+            .omap_page(oid, b"log/", b"log/1", 1, None)
             .expect("rest after log/1");
         assert!(!rest.more);
         assert_eq!(rest.entries, vec![(b"log/2".to_vec(), b"b".to_vec())]);
 
         let at = page.version;
-        let pinned = r.omap_page(oid, "log/", "", 10, Some(at)).expect("pinned");
+        let pinned = r
+            .omap_page(oid, b"log/", b"", 10, Some(at))
+            .expect("pinned");
         assert_eq!(pinned.entries, page.entries);
         assert_eq!(pinned.version, at);
 
         let after = r
-            .omap_page(oid, "log/", "log/1", 10, Some(at))
+            .omap_page(oid, b"log/", b"log/1", 10, Some(at))
             .expect("pinned page after log/1");
         assert_eq!(after.entries, vec![(b"log/2".to_vec(), b"b".to_vec())]);
 
         set(r, oid, &[(b"log/3", b"d")]);
         let err = r
-            .omap_page(oid, "log/", "", 10, Some(at))
+            .omap_page(oid, b"log/", b"", 10, Some(at))
             .expect_err("the object moved past the pin");
         assert!(
             matches!(err, Rejected::Fenced(Fence::Version { expected }) if expected == at),

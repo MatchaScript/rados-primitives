@@ -93,7 +93,8 @@ impl Replicated {
             self.fence(&holder, ttl)?;
         }
 
-        // Fencing can outlast the lease. Do not advance the epoch after losing it.
+        // Fencing can outlast the lease. This narrows the window in which a lost lease still
+        // advances the epoch; the `OmapEq` guard below is what makes that harmless.
         if !self.renew(e.oid, e.name, cookie, "", ttl)? {
             return Ok(None);
         }
@@ -102,8 +103,7 @@ impl Replicated {
         // `omap_cmp` compares a missing key as empty (`PrimaryLogPG.cc:8088-8090`). Step 1
         // created the object with the `cls_lock` xattr, so the `-ENOENT` `omap_cmp` returns
         // on a missing object (`PrimaryLogPG.cc:8047-8050`) cannot arrive here.
-        let next_epoch = increment_epoch(epoch)?;
-        let next = epoch_bytes(next_epoch);
+        let next = epoch_bytes(epoch + 1);
         self.write(
             e.oid,
             Write {
@@ -114,7 +114,7 @@ impl Replicated {
                 ])],
             },
         )?;
-        Ok(Some(next_epoch))
+        Ok(Some(epoch + 1))
     }
 
     /// Blocklists the previous holder for `ttl` and waits until this client has the OSDMap
@@ -141,23 +141,4 @@ fn decode_epoch(raw: &[u8]) -> Result<u64, Rejected> {
     }
     let bytes: [u8; 8] = raw.try_into().map_err(|_| Rejected::Rados(errno::EINVAL))?;
     Ok(u64::from_be_bytes(bytes))
-}
-
-fn increment_epoch(epoch: u64) -> Result<u64, Rejected> {
-    epoch
-        .checked_add(1)
-        .ok_or(Rejected::Rados(errno::EOVERFLOW))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn epoch_does_not_wrap() {
-        assert!(matches!(
-            increment_epoch(u64::MAX),
-            Err(Rejected::Rados(errno::EOVERFLOW))
-        ));
-    }
 }

@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 librados = { git = "https://github.com/MatchaScript/librados-rs.git", rev = "d061d08" }
-thiserror = "1.0"
+thiserror = "2.0"
 
 [dev-dependencies]
 uuid = { version = "1.6", features = ["v4"] }

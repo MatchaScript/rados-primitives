@@ -7,7 +7,7 @@ description = "Guarded single-object operations, leases, watch and writer electi
 license = "Apache-2.0"
 
 [dependencies]
-librados = { path = "../ceph-rust" }
+librados = { git = "https://github.com/MatchaScript/librados-rs.git", branch = "main" }
 thiserror = "1.0"
 
 [dev-dependencies]

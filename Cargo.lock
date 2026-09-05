@@ -69,7 +69,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 [[package]]
 name = "librados"
 version = "0.1.0"
-source = "git+https://github.com/MatchaScript/librados-rs.git?rev=d061d08#d061d086505c88176d072314d773bcb059977d5d"
+source = "git+https://github.com/MatchaScript/librados-rs.git?rev=b8b2f88#b8b2f88db5b1b8c03d979cbac368f88478ce94cc"
 dependencies = [
  "libc",
  "thiserror",

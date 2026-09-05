@@ -721,3 +721,24 @@ fn acquire_blocklists_the_previous_holder() {
         assert!(matches!(err, Rejected::Rados(EBLOCKLISTED)), "{err}");
     });
 }
+
+/// Contract: `list` returns the objects under the prefix, and nothing removed.
+#[test]
+#[ignore]
+fn list_returns_the_prefix_in_name_order() {
+    with_pool(|rados, pool, _| {
+        let bulk = Bulk::open(rados, pool).expect("open bulk");
+        for oid in ["run/2", "run/1", "index"] {
+            bulk.write_once(oid, b"x").expect("write_once");
+        }
+
+        assert_eq!(bulk.list("run/").expect("list prefix"), ["run/1", "run/2"]);
+        assert_eq!(
+            bulk.list("").expect("list all"),
+            ["index", "run/1", "run/2"]
+        );
+
+        bulk.remove("run/1").expect("remove");
+        assert_eq!(bulk.list("run/").expect("list after remove"), ["run/2"]);
+    });
+}

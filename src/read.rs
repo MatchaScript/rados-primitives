@@ -89,4 +89,19 @@ impl Bulk {
     pub fn stat(&self, oid: &str) -> Result<ObjectStat, Rejected> {
         Ok(self.io.stat(oid)?)
     }
+
+    /// The names starting with `prefix`, in name order.
+    ///
+    /// RADOS lists a pool, not a prefix: the whole namespace is walked and the prefix is
+    /// applied here. The cost is the object count of the pool, not of the prefix.
+    pub fn list(&self, prefix: &str) -> Result<Vec<String>, Rejected> {
+        let mut names: Vec<String> = self
+            .io
+            .list_objects()?
+            .into_iter()
+            .filter(|name| name.starts_with(prefix))
+            .collect();
+        names.sort();
+        Ok(names)
+    }
 }
